@@ -38,7 +38,7 @@ FootstepDesigner/
 
 ## Architecture, updated 07/07/2026
 
-![Architecture Diagram](Architecture/architecture-mermaid-diagram.svg)
+![Architecture Diagram](Architecture/architecture-mermaid-diagram.png)
 
 ## License
 

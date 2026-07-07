@@ -227,6 +227,11 @@ public class DualFootstepController : MonoBehaviour
                         
                         source.PlayOneShot(clipToPlay);
 
+                        if (PerformanceTracker.Instance != null)
+                        {
+                            PerformanceTracker.Instance.LogStepEvent(isLeft, currentSpeed, profile.surfaceTag);
+                        }
+
                         TriggerExtraSounds(forceLeft, profile.customMixerGroup);
                     }
                     else

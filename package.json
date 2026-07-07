@@ -1,0 +1,12 @@
+{
+  "name": "com.jadenadamczak.footstepdesigner",
+  "version": "1.0.0",
+  "displayName": "Granular Footstep Designer",
+  "description": "A modular footstep audio design tool providing FMOD-style control natively in Unity, featuring asymmetric dual-foot raycasting, surface mapping, and a custom Editor tool for baking granular variations.",
+  "unity": "2022.3",
+  "author": {
+    "name": "Jaden Adamczak"
+  },
+  "category": "Audio",
+  "dependencies": {}
+}

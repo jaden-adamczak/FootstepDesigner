@@ -57,3 +57,13 @@ fmod_editor.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Local Synth Folder
+/LocalSynth/
+/LocalSynth.meta
+
+# Root non-asset meta files
+/LICENSE.meta
+/README.md.meta
+/package.json.meta
+/.gitignore.meta

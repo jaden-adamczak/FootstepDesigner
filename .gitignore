@@ -67,3 +67,7 @@ Thumbs.db
 /README.md.meta
 /package.json.meta
 /.gitignore.meta
+
+# documentation
+/Documentation~/
+/Documentation~.meta

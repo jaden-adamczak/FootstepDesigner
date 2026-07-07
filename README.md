@@ -36,6 +36,10 @@ FootstepDesigner/
   Documentation~/       # Architecture docs, class diagram
 ```
 
+## Architecture, updated 07/07/2026
+
+![Architecture Diagram](Architecture/architecture-mermaid-diagram.svg)
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](file:///c:/DEV/Trinity/Dissertation/FootstepDesigner/LICENSE) for details.

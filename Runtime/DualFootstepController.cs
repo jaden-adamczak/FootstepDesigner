@@ -248,7 +248,7 @@ public class DualFootstepController : MonoBehaviour
 
                         if (PerformanceTracker.Instance != null)
                         {
-                            PerformanceTracker.Instance.LogStepEvent(isLeft, currentSpeed, profile.surfaceTag);
+                            PerformanceTracker.Instance.LogStepEvent(isLeft, currentSpeed, profile.surfaceTag, clipToPlay != null ? clipToPlay.name : "None", source.volume, source.pitch, isFoley: false);
                         }
 
                         TriggerExtraSounds(forceLeft, profile.customMixerGroup, normSpeed, source);
@@ -335,6 +335,11 @@ public class DualFootstepController : MonoBehaviour
             source.pitch = 1f + Random.Range(-pitchRand, pitchRand);
             source.volume = (0.5f + 0.5f * normSpeed) - Random.Range(0f, volRand) * (1f - normSpeed * 0.2f);
             source.PlayOneShot(clip);
+
+            if (PerformanceTracker.Instance != null)
+            {
+                PerformanceTracker.Instance.LogStepEvent(false, normSpeed * maxSpeed, "Foley", clip.name, source.volume, source.pitch, isFoley: true);
+            }
         }
     }
 

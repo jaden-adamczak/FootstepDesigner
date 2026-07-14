@@ -60,6 +60,8 @@ public class DualFootstepController : MonoBehaviour
     [Header("Debug Settings")]
     [Tooltip("Show the detection raycast in the Scene view (Green = Hit, Red = Miss).")]
     public bool showDebugRaycasts = true;
+    [Tooltip("If no surface profile matches the hit collider tag/material (or if raycast misses ground completely), fall back to playing the first registered surface profile.")]
+    public bool fallbackToFirstProfile = false;
 
     [Header("Automatic Detection")]
     [Tooltip("Automatically trigger footsteps by tracking the foot bone distance to the ground, rather than using Animation Events.")]
@@ -99,35 +101,100 @@ public class DualFootstepController : MonoBehaviour
     public AudioSource foleyAudioSource;
     public List<ExtraSoundGroup> foleySoundGroups;
 
-    public void StepLeft()
+    public void StepLeft(float customSpeed = -1f)
     {
         // Trigger the first foot marked as Left
         int leftIndex = feet.FindIndex(f => f.isLeft);
         if (leftIndex >= 0)
         {
-            StepFoot(leftIndex);
+            StepFoot(leftIndex, customSpeed);
         }
     }
 
-    public void StepRight()
+    public void StepRight(float customSpeed = -1f)
     {
         // Trigger the first foot marked as Right
         int rightIndex = feet.FindIndex(f => !f.isLeft);
         if (rightIndex >= 0)
         {
-            StepFoot(rightIndex);
+            StepFoot(rightIndex, customSpeed);
         }
     }
 
-    public void StepFoot(int index)
+    public void StepFoot(int index, float customSpeed = -1f)
     {
         if (index < 0 || index >= feet.Count) return;
         var foot = feet[index];
-        DetectAndPlay(foot.footBone, foot.audioSource, foot.isLeft);
+        DetectAndPlay(foot, customSpeed);
     }
 
-    private void DetectAndPlay(Transform footTransform, AudioSource source, bool isLeft)
+    private void PlayFootstepFromProfile(SurfaceProfile profile, bool isLeft, AudioSource source, float normSpeed, string characterName, string footName)
     {
+        // Decide what sound classification to check (force Left sounds if SymmetricLeftOnly is selected)
+        bool forceLeft = (footstepMode == FootstepMode.SymmetricLeftOnly) ? true : isLeft;
+
+        AudioClip clipToPlay = null;
+
+        if (useBakedGranularVariations)
+        {
+            var bakes = forceLeft ? profile.leftFootGranularBakes : profile.rightFootGranularBakes;
+            if (bakes != null && bakes.Count > 0)
+            {
+                int idx = Mathf.Clamp(Mathf.RoundToInt(normSpeed * (bakes.Count - 1)), 0, bakes.Count - 1);
+                int jitter = Random.Range(-1, 2);
+                idx = Mathf.Clamp(idx + jitter, 0, bakes.Count - 1);
+                clipToPlay = bakes[idx];
+            }
+        }
+        
+        if (clipToPlay == null)
+        {
+            clipToPlay = profile.GetRandomBaseSample(forceLeft);
+        }
+        
+        if (clipToPlay != null)
+        {
+            float volVariation = forceLeft ? profile.leftVolumeRandomness : profile.rightVolumeRandomness;
+            float pitchVariation = forceLeft ? profile.leftPitchRandomness : profile.rightPitchRandomness;
+            float pitchOffsetSemitones = forceLeft ? profile.leftBasePitchOffsetSemitones : profile.rightBasePitchOffsetSemitones;
+
+            source.spatialBlend = spatialBlend;
+            source.outputAudioMixerGroup = profile.customMixerGroup != null ? profile.customMixerGroup : defaultMixerGroup;
+
+            // Velocity-scaled pitch and volume using tunable curve settings
+            float basePitch = Mathf.Lerp(velocityMinPitch, velocityMaxPitch, normSpeed);
+            // Semitone offset (only applied when using base clips, not bakes which are already pitched)
+            float semitoneMultiplier = (clipToPlay != null && !useBakedGranularVariations) 
+                ? Mathf.Pow(2f, pitchOffsetSemitones / 12f) 
+                : 1f;
+            source.pitch = (basePitch + Random.Range(-pitchVariation, pitchVariation) * (1f + normSpeed * 0.3f)) * semitoneMultiplier;
+            source.volume = Mathf.Lerp(velocityMinVolume, velocityMaxVolume, normSpeed) - Random.Range(0f, volVariation) * (1f - normSpeed * 0.2f);
+            
+            source.PlayOneShot(clipToPlay);
+
+            if (PerformanceTracker.Instance != null)
+            {
+                PerformanceTracker.Instance.LogStepEvent(characterName, footName, isLeft, normSpeed * maxSpeed, profile.surfaceTag, clipToPlay.name, source.volume, source.pitch, isFoley: false);
+            }
+
+            TriggerExtraSounds(forceLeft, profile.customMixerGroup, normSpeed, source);
+        }
+        else
+        {
+            if (PlayerPrefs.GetInt("FootstepDesigner_MuteNoClips", 0) != 1)
+            {
+                Debug.LogWarning($"[FootstepController] Matched profile '{profile.name}', but no audio clips are assigned to this profile.");
+            }
+        }
+    }
+
+    private void DetectAndPlay(FootSetup foot, float customSpeed = -1f)
+    {
+        if (foot == null) return;
+        Transform footTransform = foot.footBone;
+        AudioSource source = foot.audioSource;
+        bool isLeft = foot.isLeft;
+
         if (footTransform == null)
         {
             Debug.LogWarning($"[FootstepController] Foot Bone reference is missing on the controller!");
@@ -148,15 +215,16 @@ public class DualFootstepController : MonoBehaviour
         {
             if (hasHit)
             {
-                // Draw green line from foot to hit point if it successfully hit the floor
                 Debug.DrawLine(start, hit.point, Color.green, 2f);
             }
             else
             {
-                // Draw red ray representing full search distance if it missed
                 Debug.DrawRay(start, dir * raycastDistance, Color.red, 2f);
             }
         }
+
+        float speedToUse = (customSpeed >= 0f) ? customSpeed : currentSpeed;
+        float normSpeed = Mathf.Clamp01(speedToUse / maxSpeed);
 
         if (hasHit)
         {
@@ -202,71 +270,23 @@ public class DualFootstepController : MonoBehaviour
                 if (matchesPhysicMaterial || matchesRenderMaterial || matchesTag)
                 {
                     matchedAnyProfile = true;
-
-                    // Decide what sound classification to check (force Left sounds if SymmetricLeftOnly is selected)
-                    bool forceLeft = (footstepMode == FootstepMode.SymmetricLeftOnly) ? true : isLeft;
-
-                    AudioClip clipToPlay = null;
-                    float normSpeed = Mathf.Clamp01(currentSpeed / maxSpeed);
-
-                    if (useBakedGranularVariations)
-                    {
-                        var bakes = forceLeft ? profile.leftFootGranularBakes : profile.rightFootGranularBakes;
-                        if (bakes != null && bakes.Count > 0)
-                        {
-                            int idx = Mathf.Clamp(Mathf.RoundToInt(normSpeed * (bakes.Count - 1)), 0, bakes.Count - 1);
-                            int jitter = Random.Range(-1, 2);
-                            idx = Mathf.Clamp(idx + jitter, 0, bakes.Count - 1);
-                            clipToPlay = bakes[idx];
-                        }
-                    }
-                    
-                    if (clipToPlay == null)
-                    {
-                        clipToPlay = profile.GetRandomBaseSample(forceLeft);
-                    }
-                    
-                    if (clipToPlay != null)
-                    {
-                        float volVariation = forceLeft ? profile.leftVolumeRandomness : profile.rightVolumeRandomness;
-                        float pitchVariation = forceLeft ? profile.leftPitchRandomness : profile.rightPitchRandomness;
-                        float pitchOffsetSemitones = forceLeft ? profile.leftBasePitchOffsetSemitones : profile.rightBasePitchOffsetSemitones;
-
-                        source.spatialBlend = spatialBlend;
-                        source.outputAudioMixerGroup = profile.customMixerGroup != null ? profile.customMixerGroup : defaultMixerGroup;
-
-                        // Velocity-scaled pitch and volume using tunable curve settings
-                        float basePitch = Mathf.Lerp(velocityMinPitch, velocityMaxPitch, normSpeed);
-                        // Semitone offset (only applied when using base clips, not bakes which are already pitched)
-                        float semitoneMultiplier = (clipToPlay != null && !useBakedGranularVariations) 
-                            ? Mathf.Pow(2f, pitchOffsetSemitones / 12f) 
-                            : 1f;
-                        source.pitch = (basePitch + Random.Range(-pitchVariation, pitchVariation) * (1f + normSpeed * 0.3f)) * semitoneMultiplier;
-                        source.volume = Mathf.Lerp(velocityMinVolume, velocityMaxVolume, normSpeed) - Random.Range(0f, volVariation) * (1f - normSpeed * 0.2f);
-                        
-                        source.PlayOneShot(clipToPlay);
-
-                        if (PerformanceTracker.Instance != null)
-                        {
-                            PerformanceTracker.Instance.LogStepEvent(isLeft, currentSpeed, profile.surfaceTag, clipToPlay != null ? clipToPlay.name : "None", source.volume, source.pitch, isFoley: false);
-                        }
-
-                        TriggerExtraSounds(forceLeft, profile.customMixerGroup, normSpeed, source);
-
-                    }
-                    else
-                    {
-                        if (PlayerPrefs.GetInt("FootstepDesigner_MuteNoClips", 0) != 1)
-                        {
-                            Debug.LogWarning($"[FootstepController] Matched profile '{profile.name}' for {hit.collider.name}, but no audio clips are assigned to this profile.");
-                        }
-                    }
+                    PlayFootstepFromProfile(profile, isLeft, source, normSpeed, gameObject.name, foot.name);
                     break;
                 }
             }
 
             if (!matchedAnyProfile)
             {
+                if (fallbackToFirstProfile && surfaceProfiles != null && surfaceProfiles.Count > 0)
+                {
+                    SurfaceProfile fallbackProfile = surfaceProfiles.Find(p => p != null);
+                    if (fallbackProfile != null)
+                    {
+                        PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                        return;
+                    }
+                }
+
                 if (PlayerPrefs.GetInt("FootstepDesigner_MuteNoProfileMatch", 0) != 1)
                 {
                     string registered = "";
@@ -285,6 +305,16 @@ public class DualFootstepController : MonoBehaviour
         }
         else
         {
+            if (fallbackToFirstProfile && surfaceProfiles != null && surfaceProfiles.Count > 0)
+            {
+                SurfaceProfile fallbackProfile = surfaceProfiles.Find(p => p != null);
+                if (fallbackProfile != null)
+                {
+                    PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                    return;
+                }
+            }
+
             if (PlayerPrefs.GetInt("FootstepDesigner_MuteRaycastMiss", 0) != 1)
             {
                 Debug.LogWarning($"[FootstepController] Raycast from '{footTransform.name}' missed the ground. The floor might be too far away (Raycast Distance: {raycastDistance}) or the floor's layer is not included in the groundLayer mask.");
@@ -338,7 +368,7 @@ public class DualFootstepController : MonoBehaviour
 
             if (PerformanceTracker.Instance != null)
             {
-                PerformanceTracker.Instance.LogStepEvent(false, normSpeed * maxSpeed, "Foley", clip.name, source.volume, source.pitch, isFoley: true);
+                PerformanceTracker.Instance.LogStepEvent(gameObject.name, "Foley", false, normSpeed * maxSpeed, "Foley", clip.name, source.volume, source.pitch, isFoley: true);
             }
         }
     }
@@ -391,7 +421,7 @@ public class DualFootstepController : MonoBehaviour
         // Trigger step if the foot just landed and the cooldown is over
         if (isGroundedNow && !foot.wasGrounded && foot.cooldownTimer <= 0f)
         {
-            DetectAndPlay(foot.footBone, foot.audioSource, foot.isLeft);
+            DetectAndPlay(foot);
             foot.cooldownTimer = stepCooldown;
         }
 

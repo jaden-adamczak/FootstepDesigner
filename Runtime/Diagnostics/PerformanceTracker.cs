@@ -29,6 +29,8 @@ public class PerformanceTracker : MonoBehaviour
         public string clipName;
         public bool isFoley;
         public bool isConsecutiveRepetition;
+        public string characterName;
+        public string footName;
     }
 
     private List<StepRecord> stepHistory = new List<StepRecord>();
@@ -138,7 +140,7 @@ public class PerformanceTracker : MonoBehaviour
         WriteLogLine(logLine);
     }
 
-    public void LogStepEvent(bool isLeft, float speed, string surfaceTag, string clipName, float volume, float pitch, bool isFoley)
+    public void LogStepEvent(string characterName, string footName, bool isLeft, float speed, string surfaceTag, string clipName, float volume, float pitch, bool isFoley)
     {
         if (isFoley) totalFoleyEvents++;
         else totalSteps++;
@@ -185,7 +187,9 @@ public class PerformanceTracker : MonoBehaviour
             surface = surfaceTag,
             clipName = clipName,
             isFoley = isFoley,
-            isConsecutiveRepetition = isRepetition
+            isConsecutiveRepetition = isRepetition,
+            characterName = characterName,
+            footName = footName
         };
 
         stepHistory.Add(record);
@@ -195,8 +199,10 @@ public class PerformanceTracker : MonoBehaviour
         }
 
         string side = isFoley ? "foley" : (isLeft ? "left" : "right");
-        string logLine = string.Format("{0:F2},[step],{1},speed={2:F2},surface={3},clip={4},volume={5:F3},pitch={6:F3},rep={7}",
+        string logLine = string.Format("{0:F2},[step],char={1},foot={2},side={3},speed={4:F2},surface={5},clip={6},volume={7:F3},pitch={8:F3},rep={9}",
             Time.time,
+            characterName,
+            footName,
             side,
             speed,
             surfaceTag,

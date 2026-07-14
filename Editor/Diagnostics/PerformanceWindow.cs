@@ -31,28 +31,11 @@ public class PerformanceWindow : EditorWindow
     private void OnEnable()
     {
         logPath = Path.Combine(Application.dataPath, "../footstep_performance.log");
-        EditorApplication.update += EditorUpdate;
     }
 
     private void OnDisable()
     {
-        EditorApplication.update -= EditorUpdate;
         StopStressLoadTest();
-    }
-
-    private void EditorUpdate()
-    {
-        if (isStressLoadTesting && Application.isPlaying)
-        {
-            double currentTime = EditorApplication.timeSinceStartup;
-            double interval = 1f / stepTriggerRate;
-
-            if (currentTime - lastStepTime >= interval)
-            {
-                lastStepTime = currentTime;
-                TriggerRandomMockSteps();
-            }
-        }
     }
 
     private void OnGUI()
@@ -155,7 +138,6 @@ public class PerformanceWindow : EditorWindow
             charactersToSpawn = EditorGUILayout.IntField("Mock Characters", charactersToSpawn);
             feetPerCharacter = EditorGUILayout.IntSlider("Feet per Character", feetPerCharacter, 1, 16);
             mockProfilesCount = EditorGUILayout.IntField("Dynamic Profiles", mockProfilesCount);
-            stepTriggerRate = EditorGUILayout.Slider("Steps per Second (Load Test)", stepTriggerRate, 1f, 100f);
 
             GUILayout.Space(5);
 
@@ -275,15 +257,21 @@ public class PerformanceWindow : EditorWindow
             }
         }
 
+        // Draw Y-axis reference units directly on the graph background
+        GUI.color = new Color(0.7f, 0.7f, 0.7f, 0.8f);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, 150, 15), "1.0 (Vol) / 1.5 (Pitch)", EditorStyles.miniLabel);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + rect.height * 0.5f - 8f, 150, 15), "0.5 (Vol) / 1.0 (Pitch)", EditorStyles.miniLabel);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + rect.height - 15f, 150, 15), "0.0 (Vol) / 0.5 (Pitch)", EditorStyles.miniLabel);
+
         Handles.EndGUI();
         GUI.color = oldColor;
 
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("Legend: ", EditorStyles.miniLabel);
         GUI.color = new Color(0f, 0.8f, 1f, 1f);
-        GUILayout.Label("■ Volume  ", EditorStyles.miniLabel);
+        GUILayout.Label("■ Volume (0.0 - 1.0)  ", EditorStyles.miniLabel);
         GUI.color = new Color(1f, 0.6f, 0.1f, 1f);
-        GUILayout.Label("■ Pitch  ", EditorStyles.miniLabel);
+        GUILayout.Label("■ Pitch (0.5 - 1.5)  ", EditorStyles.miniLabel);
         GUI.color = new Color(1f, 0.2f, 0.2f, 1f);
         GUILayout.Label("■ Repetition Warning  ", EditorStyles.miniLabel);
         GUI.color = Color.white;
@@ -293,15 +281,22 @@ public class PerformanceWindow : EditorWindow
 
     private void GenerateStressScene()
     {
-        // 1. Setup root folder and temporary assets folder
-        string stressTestFolder = "Assets/LocalSynth/StressTest";
-        if (!Directory.Exists(stressTestFolder))
-        {
-            Directory.CreateDirectory(stressTestFolder);
-        }
-
-        // Clean any old stress objects
+        // 1. Clean any old stress objects first to avoid directory locks
         ClearStressScene();
+
+        // 2. Setup folders safely using AssetDatabase (forces Unity to register directories)
+        string parentFolder = "Assets/LocalSynth";
+        string subFolder = "StressTest";
+        string stressTestFolder = $"{parentFolder}/{subFolder}";
+
+        if (!AssetDatabase.IsValidFolder(parentFolder))
+        {
+            AssetDatabase.CreateFolder("Assets", "LocalSynth");
+        }
+        if (!AssetDatabase.IsValidFolder(stressTestFolder))
+        {
+            AssetDatabase.CreateFolder(parentFolder, subFolder);
+        }
 
         stressRootGO = new GameObject("__STRESS_TEST_ROOT__");
 
@@ -353,7 +348,9 @@ public class PerformanceWindow : EditorWindow
             // Add controller
             DualFootstepController controller = mockChar.AddComponent<DualFootstepController>();
             controller.autoDetectSteps = false; // Trigger manually to simulate load
+            controller.fallbackToFirstProfile = true; // Avoid tag matching issues in empty scenes
             controller.surfaceProfiles = new List<SurfaceProfile>(mockProfiles);
+
 
             // Add feet bones
             controller.feet = new List<DualFootstepController.FootSetup>();
@@ -448,7 +445,15 @@ public class PerformanceWindow : EditorWindow
         }
 
         isStressLoadTesting = true;
-        lastStepTime = EditorApplication.timeSinceStartup;
+        foreach (var mockChar in spawnedMockCharacters)
+        {
+            if (mockChar != null)
+            {
+                var walker = mockChar.GetComponent<MockCharacterWalker>();
+                if (walker == null) walker = mockChar.AddComponent<MockCharacterWalker>();
+                walker.enabled = true;
+            }
+        }
         Debug.Log("[StressTest] Load testing started.");
     }
 
@@ -457,33 +462,15 @@ public class PerformanceWindow : EditorWindow
         if (isStressLoadTesting)
         {
             isStressLoadTesting = false;
+            foreach (var mockChar in spawnedMockCharacters)
+            {
+                if (mockChar != null)
+                {
+                    var walker = mockChar.GetComponent<MockCharacterWalker>();
+                    if (walker != null) walker.enabled = false;
+                }
+            }
             Debug.Log("[StressTest] Load testing stopped.");
-        }
-    }
-
-    private void TriggerRandomMockSteps()
-    {
-        if (spawnedMockCharacters.Count == 0) return;
-
-        // Choose a random character and a random leg to trigger a step
-        int charIdx = Random.Range(0, spawnedMockCharacters.Count);
-        GameObject charGO = spawnedMockCharacters[charIdx];
-        if (charGO == null) return;
-
-        DualFootstepController controller = charGO.GetComponent<DualFootstepController>();
-        if (controller == null || controller.feet == null || controller.feet.Count == 0) return;
-
-        int legIdx = Random.Range(0, controller.feet.Count);
-        var leg = controller.feet[legIdx];
-
-        // Simulate step trigger (Force left step trigger if leg setup classifies it as left)
-        if (leg.isLeft)
-        {
-            controller.StepLeft();
-        }
-        else
-        {
-            controller.StepRight();
         }
     }
 

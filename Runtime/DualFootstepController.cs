@@ -11,7 +11,7 @@ public class DualFootstepController : MonoBehaviour
     }
 
     [Header("Configuration Mode")]
-    public FootstepMode footstepMode = FootstepMode.AsymmetricLeftRight;
+    public FootstepMode footstepMode = FootstepMode.SymmetricLeftOnly;
 
     [System.Serializable]
     public class FootSetup
@@ -43,7 +43,16 @@ public class DualFootstepController : MonoBehaviour
     public bool useBakedGranularVariations = true;
 
     [Header("Velocity Scaling")]
+    [Tooltip("Character speed considered 100% velocity (fully loud & high-pitched).")]
     public float maxSpeed = 6f;
+    [Tooltip("Pitch at minimum speed (0 m/s). Default 0.9.")]
+    [Range(0.5f, 1.5f)] public float velocityMinPitch = 0.9f;
+    [Tooltip("Pitch at maximum speed. Default 1.1.")]
+    [Range(0.5f, 2.0f)] public float velocityMaxPitch = 1.1f;
+    [Tooltip("Volume multiplier at minimum speed. Range 0-1. Default 0.5.")]
+    [Range(0f, 1f)] public float velocityMinVolume = 0.5f;
+    [Tooltip("Volume multiplier at maximum speed. Default 1.0.")]
+    [Range(0f, 1f)] public float velocityMaxVolume = 1.0f;
 
     private Vector3 lastPosition;
     private float currentSpeed;
@@ -80,6 +89,10 @@ public class DualFootstepController : MonoBehaviour
         [Header("Step Filters")]
         public bool triggerOnLeft = true;
         public bool triggerOnRight = true;
+
+        [Header("Audio Routing")]
+        [Tooltip("Optional: assign a dedicated AudioSource for this group. Falls back to the foley source, then the foot's own source.")]
+        public AudioSource customAudioSource;
     }
 
     [Header("Extra Sounds (Accessory / Gear)")]
@@ -184,7 +197,7 @@ public class DualFootstepController : MonoBehaviour
                     }
                 }
 
-                bool matchesTag = profile.surfaceTag == groundTag;
+                bool matchesTag = !string.IsNullOrEmpty(profile.surfaceTag) && profile.surfaceTag != "Untagged" && profile.surfaceTag == groundTag;
 
                 if (matchesPhysicMaterial || matchesRenderMaterial || matchesTag)
                 {
@@ -217,21 +230,30 @@ public class DualFootstepController : MonoBehaviour
                     {
                         float volVariation = forceLeft ? profile.leftVolumeRandomness : profile.rightVolumeRandomness;
                         float pitchVariation = forceLeft ? profile.leftPitchRandomness : profile.rightPitchRandomness;
+                        float pitchOffsetSemitones = forceLeft ? profile.leftBasePitchOffsetSemitones : profile.rightBasePitchOffsetSemitones;
 
                         source.spatialBlend = spatialBlend;
                         source.outputAudioMixerGroup = profile.customMixerGroup != null ? profile.customMixerGroup : defaultMixerGroup;
 
-                        float basePitch = Mathf.Lerp(0.9f, 1.1f, normSpeed);
-                        source.pitch = basePitch + Random.Range(-pitchVariation, pitchVariation) * (1f + normSpeed * 0.3f);
-                        source.volume = (0.5f + 0.5f * normSpeed) - Random.Range(0f, volVariation) * (1f - normSpeed * 0.2f);
+                        // Velocity-scaled pitch and volume using tunable curve settings
+                        float basePitch = Mathf.Lerp(velocityMinPitch, velocityMaxPitch, normSpeed);
+                        // Semitone offset (only applied when using base clips, not bakes which are already pitched)
+                        float semitoneMultiplier = (clipToPlay != null && !useBakedGranularVariations) 
+                            ? Mathf.Pow(2f, pitchOffsetSemitones / 12f) 
+                            : 1f;
+                        source.pitch = (basePitch + Random.Range(-pitchVariation, pitchVariation) * (1f + normSpeed * 0.3f)) * semitoneMultiplier;
+                        source.volume = Mathf.Lerp(velocityMinVolume, velocityMaxVolume, normSpeed) - Random.Range(0f, volVariation) * (1f - normSpeed * 0.2f);
                         
                         source.PlayOneShot(clipToPlay);
 
-                        TriggerExtraSounds(forceLeft, profile.customMixerGroup);
+                        TriggerExtraSounds(forceLeft, profile.customMixerGroup, normSpeed, source);
                     }
                     else
                     {
-                        Debug.LogWarning($"[FootstepController] Matched profile '{profile.name}' for {hit.collider.name}, but no audio clips are assigned to this profile.");
+                        if (PlayerPrefs.GetInt("FootstepDesigner_MuteNoClips", 0) != 1)
+                        {
+                            Debug.LogWarning($"[FootstepController] Matched profile '{profile.name}' for {hit.collider.name}, but no audio clips are assigned to this profile.");
+                        }
                     }
                     break;
                 }
@@ -239,24 +261,40 @@ public class DualFootstepController : MonoBehaviour
 
             if (!matchedAnyProfile)
             {
-                Debug.LogWarning($"[FootstepController] Stepped on '{hit.collider.name}' (Tag: {groundTag}, PhysicMaterial: {(hitPhysicMaterial != null ? hitPhysicMaterial.name : "None")}), but no matching SurfaceProfile was found in the controller's list.");
+                if (PlayerPrefs.GetInt("FootstepDesigner_MuteNoProfileMatch", 0) != 1)
+                {
+                    string registered = "";
+                    if (surfaceProfiles != null)
+                    {
+                        var names = new List<string>();
+                        for (int p = 0; p < surfaceProfiles.Count; p++)
+                        {
+                            if (surfaceProfiles[p] != null) names.Add(surfaceProfiles[p].name);
+                        }
+                        registered = string.Join(", ", names);
+                    }
+                    Debug.LogWarning($"[FootstepController] Stepped on '{hit.collider.name}' (Tag: {groundTag}, PhysicMaterial: {(hitPhysicMaterial != null ? hitPhysicMaterial.name : "None")}), but no matching SurfaceProfile was found. controller registered profiles: [{registered}]");
+                }
             }
         }
         else
         {
-            Debug.LogWarning($"[FootstepController] Raycast from '{footTransform.name}' missed the ground. The floor might be too far away (Raycast Distance: {raycastDistance}) or the floor's layer is not included in the groundLayer mask.");
+            if (PlayerPrefs.GetInt("FootstepDesigner_MuteRaycastMiss", 0) != 1)
+            {
+                Debug.LogWarning($"[FootstepController] Raycast from '{footTransform.name}' missed the ground. The floor might be too far away (Raycast Distance: {raycastDistance}) or the floor's layer is not included in the groundLayer mask.");
+            }
         }
     }
 
-    private void TriggerExtraSounds(bool isLeftStep, UnityEngine.Audio.AudioMixerGroup surfaceMixer)
+    private void TriggerExtraSounds(bool isLeftStep, UnityEngine.Audio.AudioMixerGroup surfaceMixer, float normSpeed, AudioSource footSource)
     {
-        if (foleyAudioSource == null || foleySoundGroups == null) return;
+        if (foleySoundGroups == null) return;
 
         foreach (var group in foleySoundGroups)
         {
             if (group.clips == null || group.clips.Count == 0) continue;
 
-            // Apply step triggers
+            // Apply step filters
             if (isLeftStep && !group.triggerOnLeft) continue;
             if (!isLeftStep && !group.triggerOnRight) continue;
 
@@ -264,26 +302,33 @@ public class DualFootstepController : MonoBehaviour
             {
                 AudioClip extraClip = group.clips[Random.Range(0, group.clips.Count)];
                 float delay = Random.Range(group.minDelay, group.maxDelay);
-                
-                // If foley has a mixer slot, use surface mixer or default mixer
+
                 UnityEngine.Audio.AudioMixerGroup targetMixer = surfaceMixer != null ? surfaceMixer : defaultMixerGroup;
-                
-                StartCoroutine(PlayExtraSoundDelayed(extraClip, delay, group.pitchRandomness, group.volumeRandomness, targetMixer));
+
+                // Resolve audio source priority: group-specific > foley > foot's own
+                AudioSource effectiveSource = group.customAudioSource != null ? group.customAudioSource
+                    : foleyAudioSource != null ? foleyAudioSource
+                    : footSource;
+
+                if (effectiveSource == null) continue;
+
+                StartCoroutine(PlayExtraSoundDelayed(extraClip, delay, group.pitchRandomness, group.volumeRandomness, targetMixer, normSpeed, effectiveSource));
             }
         }
     }
 
-    private IEnumerator PlayExtraSoundDelayed(AudioClip clip, float delay, float pitchRand, float volRand, UnityEngine.Audio.AudioMixerGroup targetMixer)
+    private IEnumerator PlayExtraSoundDelayed(AudioClip clip, float delay, float pitchRand, float volRand, UnityEngine.Audio.AudioMixerGroup targetMixer, float normSpeed, AudioSource source)
     {
         yield return new WaitForSeconds(delay);
-        if (foleyAudioSource != null && clip != null)
+        if (source != null && clip != null)
         {
-            foleyAudioSource.spatialBlend = spatialBlend;
-            foleyAudioSource.outputAudioMixerGroup = targetMixer;
+            source.spatialBlend = spatialBlend;
+            source.outputAudioMixerGroup = targetMixer;
 
-            foleyAudioSource.pitch = 1f + Random.Range(-pitchRand, pitchRand);
-            foleyAudioSource.volume = 1f - Random.Range(0f, volRand);
-            foleyAudioSource.PlayOneShot(clip);
+            // Mirror the main footstep velocity scaling so clanks feel proportional to movement speed
+            source.pitch = 1f + Random.Range(-pitchRand, pitchRand);
+            source.volume = (0.5f + 0.5f * normSpeed) - Random.Range(0f, volRand) * (1f - normSpeed * 0.2f);
+            source.PlayOneShot(clip);
         }
     }
 

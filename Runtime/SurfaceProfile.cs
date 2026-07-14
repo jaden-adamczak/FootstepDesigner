@@ -19,6 +19,8 @@ public class SurfaceProfile : ScriptableObject
     public List<AudioClip> leftFootGranularBakes = new List<AudioClip>();
     [Range(0f, 0.5f)] public float leftPitchRandomness = 0.05f;
     [Range(0f, 1f)] public float leftVolumeRandomness = 0.1f;
+    [Tooltip("Semitone offset applied to base clips when playing without baked granular variations. +12 = one octave up, -12 = one octave down.")]
+    [Range(-12f, 12f)] public float leftBasePitchOffsetSemitones = 0f;
 
     [Header("Right Foot (e.g., Peg-Leg)")]
     [Tooltip("Base audio clips for traditional random selection.")]
@@ -27,6 +29,8 @@ public class SurfaceProfile : ScriptableObject
     public List<AudioClip> rightFootGranularBakes = new List<AudioClip>();
     [Range(0f, 0.5f)] public float rightPitchRandomness = 0.05f;
     [Range(0f, 1f)] public float rightVolumeRandomness = 0.1f;
+    [Tooltip("Semitone offset applied to base clips when playing without baked granular variations. +12 = one octave up, -12 = one octave down.")]
+    [Range(-12f, 12f)] public float rightBasePitchOffsetSemitones = 0f;
     
     // Helper function to get a random baked clip for a specific foot
     public AudioClip GetRandomBake(bool isLeftFoot)

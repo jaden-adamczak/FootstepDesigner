@@ -7,7 +7,7 @@ using System.Collections.Generic;
 public class FootstepDesignerWindow : EditorWindow
 {
     private int activeTab = 0;
-    private string[] tabNames = { "Profiles", "Scene Controller", "Audio Effects Station", "Credits & License" };
+    private string[] tabNames = { "Profiles", "Scene Controller", "Audio Effects Station", "Settings", "Credits & License" };
 
     // Profiles Tab variables
     private List<SurfaceProfile> allProfiles = new List<SurfaceProfile>();
@@ -16,6 +16,9 @@ public class FootstepDesignerWindow : EditorWindow
     private Vector2 detailsScroll;
     private string searchString = "";
     private string newProfileTag = "";
+    private float sidebarWidth = 220f;
+    private bool isResizingSidebar = false;
+    private bool sidebarCollapsed = false;
 
     // Granular Baker variables
     public enum TargetFoot { Left, Right, Both }
@@ -43,6 +46,11 @@ public class FootstepDesignerWindow : EditorWindow
     private List<IFootstepDSP> dspPlugins = new List<IFootstepDSP>();
     private AudioClip previewProcessedClip;
     private Vector2 effectsScroll;
+    private float effectsMasterGain = 1.0f;
+    private float[] effectsAmplitudeEnvelope;
+
+    // Granular Baker gain
+    private float bakerMasterGain = 1.0f;
 
     // Credits Tab variables
     private Vector2 licenseScroll;
@@ -132,6 +140,9 @@ public class FootstepDesignerWindow : EditorWindow
                 DrawEffectsStationTab();
                 break;
             case 3:
+                DrawSettingsTab();
+                break;
+            case 4:
                 DrawCreditsTab();
                 break;
         }
@@ -157,50 +168,89 @@ public class FootstepDesignerWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
 
-        // Left Sidebar
-        EditorGUILayout.BeginVertical("box", GUILayout.Width(250), GUILayout.ExpandHeight(true));
-        EditorGUILayout.LabelField("Surface Profiles", EditorStyles.boldLabel);
-        GUILayout.Space(5);
-
-        searchString = EditorGUILayout.TextField("Search", searchString);
-        GUILayout.Space(5);
-
-        sidebarScroll = EditorGUILayout.BeginScrollView(sidebarScroll, GUILayout.ExpandHeight(true));
-        foreach (var profile in allProfiles)
+        if (sidebarCollapsed)
         {
-            if (profile == null) continue;
-
-            if (!string.IsNullOrEmpty(searchString))
+            EditorGUILayout.BeginVertical("box", GUILayout.Width(30), GUILayout.ExpandHeight(true));
+            if (GUILayout.Button("▶", GUILayout.Width(20), GUILayout.Height(30)))
             {
-                bool matchesTag = profile.surfaceTag.ToLower().Contains(searchString.ToLower());
-                bool matchesName = profile.name.ToLower().Contains(searchString.ToLower());
-                if (!matchesTag && !matchesName) continue;
+                sidebarCollapsed = false;
             }
-
-            GUIStyle style = (selectedProfile == profile) ? activeStyle : normalStyle;
-            string displayName = string.IsNullOrEmpty(profile.surfaceTag) ? "[No Tag]" : profile.surfaceTag;
+            EditorGUILayout.EndVertical();
+        }
+        else
+        {
+            EditorGUILayout.BeginVertical("box", GUILayout.Width(sidebarWidth), GUILayout.ExpandHeight(true));
             
-            if (GUILayout.Button($"{displayName} ({profile.name})", style, GUILayout.Height(25)))
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Surface Profiles", EditorStyles.boldLabel);
+            if (GUILayout.Button("◀", GUILayout.Width(20)))
             {
-                selectedProfile = profile;
-                GUI.FocusControl("");
+                sidebarCollapsed = true;
+            }
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(5);
+
+            searchString = EditorGUILayout.TextField("Search", searchString);
+            GUILayout.Space(5);
+
+            sidebarScroll = EditorGUILayout.BeginScrollView(sidebarScroll, GUILayout.ExpandHeight(true));
+            foreach (var profile in allProfiles)
+            {
+                if (profile == null) continue;
+
+                if (!string.IsNullOrEmpty(searchString))
+                {
+                    bool matchesTag = profile.surfaceTag.ToLower().Contains(searchString.ToLower());
+                    bool matchesName = profile.name.ToLower().Contains(searchString.ToLower());
+                    if (!matchesTag && !matchesName) continue;
+                }
+
+                GUIStyle style = (selectedProfile == profile) ? activeStyle : normalStyle;
+                string displayName = string.IsNullOrEmpty(profile.surfaceTag) ? "[No Tag]" : profile.surfaceTag;
+                
+                if (GUILayout.Button($"{displayName} ({profile.name})", style, GUILayout.Height(25)))
+                {
+                    selectedProfile = profile;
+                    GUI.FocusControl("");
+                }
+            }
+            EditorGUILayout.EndScrollView();
+
+            GUILayout.Space(10);
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Create New Profile", EditorStyles.boldLabel);
+            newProfileTag = EditorGUILayout.TextField("Surface Tag", newProfileTag);
+            if (GUILayout.Button("Create Profile"))
+            {
+                CreateNewProfile(newProfileTag);
+            }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.EndVertical();
+
+            Rect splitterRect = GUILayoutUtility.GetRect(5, 0, GUILayout.Width(5), GUILayout.ExpandHeight(true));
+            EditorGUIUtility.AddCursorRect(splitterRect, MouseCursor.ResizeHorizontal);
+            GUI.Box(new Rect(splitterRect.x + 2, splitterRect.y, 1, splitterRect.height), "");
+
+            if (Event.current != null)
+            {
+                if (Event.current.type == EventType.MouseDown && splitterRect.Contains(Event.current.mousePosition))
+                {
+                    isResizingSidebar = true;
+                }
+                if (isResizingSidebar)
+                {
+                    sidebarWidth = Event.current.mousePosition.x;
+                    sidebarWidth = Mathf.Clamp(sidebarWidth, 120f, 400f);
+                    Repaint();
+                }
+                if (Event.current.type == EventType.MouseUp)
+                {
+                    isResizingSidebar = false;
+                }
             }
         }
-        EditorGUILayout.EndScrollView();
-
-        GUILayout.Space(10);
-
-        // Create Profile Block
-        EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("Create New Profile", EditorStyles.boldLabel);
-        newProfileTag = EditorGUILayout.TextField("Surface Tag", newProfileTag);
-        if (GUILayout.Button("Create Profile"))
-        {
-            CreateNewProfile(newProfileTag);
-        }
-        EditorGUILayout.EndVertical();
-
-        EditorGUILayout.EndVertical();
 
         // Right Detail Editor Panel
         EditorGUILayout.BeginVertical("box", GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
@@ -241,7 +291,41 @@ public class FootstepDesignerWindow : EditorWindow
             EditorGUILayout.LabelField($"Asset Path: {AssetDatabase.GetAssetPath(selectedProfile)}", EditorStyles.miniLabel);
             GUILayout.Space(10);
 
+            var controller = GameObject.FindAnyObjectByType<DualFootstepController>();
+            if (controller != null)
+            {
+                bool inList = controller.surfaceProfiles != null && controller.surfaceProfiles.Contains(selectedProfile);
+                if (inList)
+                {
+                    GUI.backgroundColor = new Color(0.9f, 0.4f, 0.4f);
+                    if (GUILayout.Button("Remove from Scene Controller Profile List", GUILayout.Height(25)))
+                    {
+                        controller.surfaceProfiles.Remove(selectedProfile);
+                        EditorUtility.SetDirty(controller);
+                    }
+                    GUI.backgroundColor = Color.white;
+                }
+                else
+                {
+                    GUI.backgroundColor = new Color(0.4f, 0.9f, 0.4f);
+                    if (GUILayout.Button("Add to Scene Controller Profile List", GUILayout.Height(25)))
+                    {
+                        if (controller.surfaceProfiles == null)
+                        {
+                            controller.surfaceProfiles = new List<SurfaceProfile>();
+                        }
+                        controller.surfaceProfiles.Add(selectedProfile);
+                        EditorUtility.SetDirty(controller);
+                    }
+                    GUI.backgroundColor = Color.white;
+                }
+                GUILayout.Space(10);
+            }
+
             EditorGUI.BeginChangeCheck();
+
+            EditorGUILayout.HelpBox("Specify at least ONE of the three checks below (Tag, Physic Material, or Render Material) to match this profile on raycast hit. Any single match will trigger this surface profile.", MessageType.Info);
+            GUILayout.Space(5);
 
             // Settings Tag
             EditorGUILayout.BeginHorizontal();
@@ -311,6 +395,11 @@ public class FootstepDesignerWindow : EditorWindow
             EditorGUILayout.LabelField("Left Foot Audio Config (Pool)", EditorStyles.boldLabel);
             selectedProfile.leftPitchRandomness = EditorGUILayout.Slider("Pitch Randomness", selectedProfile.leftPitchRandomness, 0f, 0.5f);
             selectedProfile.leftVolumeRandomness = EditorGUILayout.Slider("Volume Randomness", selectedProfile.leftVolumeRandomness, 0f, 1f);
+
+            EditorGUILayout.BeginHorizontal();
+            selectedProfile.leftBasePitchOffsetSemitones = EditorGUILayout.Slider("Base Clip Pitch Offset (semitones)", selectedProfile.leftBasePitchOffsetSemitones, -12f, 12f);
+            DrawInfoIcon("Shifts the pitch of base clips in semitones when playing without baked granular variations. +12 = one octave up.");
+            EditorGUILayout.EndHorizontal();
             
             // Base Samples List
             if (selectedProfile.leftFootBaseSamples == null)
@@ -378,6 +467,11 @@ public class FootstepDesignerWindow : EditorWindow
             EditorGUILayout.LabelField("Right Foot Audio Config (Pool)", EditorStyles.boldLabel);
             selectedProfile.rightPitchRandomness = EditorGUILayout.Slider("Pitch Randomness", selectedProfile.rightPitchRandomness, 0f, 0.5f);
             selectedProfile.rightVolumeRandomness = EditorGUILayout.Slider("Volume Randomness", selectedProfile.rightVolumeRandomness, 0f, 1f);
+
+            EditorGUILayout.BeginHorizontal();
+            selectedProfile.rightBasePitchOffsetSemitones = EditorGUILayout.Slider("Base Clip Pitch Offset (semitones)", selectedProfile.rightBasePitchOffsetSemitones, -12f, 12f);
+            DrawInfoIcon("Shifts the pitch of base clips in semitones when playing without baked granular variations. +12 = one octave up.");
+            EditorGUILayout.EndHorizontal();
 
             // Base Samples List
             if (selectedProfile.rightFootBaseSamples == null)
@@ -474,6 +568,11 @@ public class FootstepDesignerWindow : EditorWindow
             
             clearExistingBakes = EditorGUILayout.Toggle("Clear Existing Bakes", clearExistingBakes);
 
+            EditorGUILayout.BeginHorizontal();
+            bakerMasterGain = EditorGUILayout.Slider("Master Gain", bakerMasterGain, 0.1f, 3.0f);
+            DrawInfoIcon("Multiply the final sample amplitude before writing to disk. Use > 1.0 to boost quiet samples (e.g. grass), < 1.0 to reduce hot signals.");
+            EditorGUILayout.EndHorizontal();
+
             GUILayout.Space(10);
             if (GUILayout.Button("Bake Variations", GUILayout.Height(30)))
             {
@@ -527,8 +626,13 @@ public class FootstepDesignerWindow : EditorWindow
 
             EditorGUILayout.BeginHorizontal();
             activeController.useBakedGranularVariations = EditorGUILayout.Toggle("Use Baked Granular", activeController.useBakedGranularVariations);
-            DrawInfoIcon("If enabled, plays synthesized granular variations from the profile. If disabled, plays random base clips with on-the-spot pitch/volume shifting.");
+            DrawInfoIcon("If enabled, plays synthesized granular variations from the profile. If disabled, plays random base clips with pitch/volume randomness applied on-the-spot (traditional pitch shifting).");
             EditorGUILayout.EndHorizontal();
+
+            if (!activeController.useBakedGranularVariations)
+            {
+                EditorGUILayout.HelpBox("Traditional mode active: a random base clip is selected per step and pitch-shifted in real-time. No baking required. Use Base Clip Pitch Offset (on each Surface Profile) to tune the register of your samples.", MessageType.Info);
+            }
 
             EditorGUILayout.BeginHorizontal();
             activeController.spatialBlend = EditorGUILayout.Slider("Spatial Blend (2D/3D)", activeController.spatialBlend, 0f, 1f);
@@ -538,6 +642,30 @@ public class FootstepDesignerWindow : EditorWindow
             EditorGUILayout.BeginHorizontal();
             activeController.defaultMixerGroup = (UnityEngine.Audio.AudioMixerGroup)EditorGUILayout.ObjectField("Default Mixer Group", activeController.defaultMixerGroup, typeof(UnityEngine.Audio.AudioMixerGroup), false);
             DrawInfoIcon("Default Audio Mixer Group destination.");
+            EditorGUILayout.EndHorizontal();
+
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Velocity Curve", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            activeController.maxSpeed = EditorGUILayout.FloatField("Max Speed (m/s)", activeController.maxSpeed);
+            DrawInfoIcon("Character speed (m/s) considered 100% velocity — fully loud and highest pitch.");
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Pitch Range (Min → Max)", GUILayout.Width(180));
+            activeController.velocityMinPitch = EditorGUILayout.FloatField(activeController.velocityMinPitch, GUILayout.Width(50));
+            EditorGUILayout.LabelField("→", GUILayout.Width(16));
+            activeController.velocityMaxPitch = EditorGUILayout.FloatField(activeController.velocityMaxPitch, GUILayout.Width(50));
+            DrawInfoIcon("AudioSource.pitch interpolated from min (slow) to max (fast). 1.0 = no shift.");
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Volume Range (Min → Max)", GUILayout.Width(180));
+            activeController.velocityMinVolume = EditorGUILayout.FloatField(activeController.velocityMinVolume, GUILayout.Width(50));
+            EditorGUILayout.LabelField("→", GUILayout.Width(16));
+            activeController.velocityMaxVolume = EditorGUILayout.FloatField(activeController.velocityMaxVolume, GUILayout.Width(50));
+            DrawInfoIcon("Volume interpolated from min (slow) to max (fast). 1.0 = full.");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
@@ -674,6 +802,11 @@ public class FootstepDesignerWindow : EditorWindow
                 group.triggerOnRight = EditorGUILayout.Toggle("Trigger on Right", group.triggerOnRight);
                 EditorGUILayout.EndHorizontal();
 
+                EditorGUILayout.BeginHorizontal();
+                group.customAudioSource = (AudioSource)EditorGUILayout.ObjectField("Custom Audio Source", group.customAudioSource, typeof(AudioSource), true);
+                DrawInfoIcon("Optional dedicated AudioSource for this group. Falls back to the controller's Foley source, then the triggering foot's source.");
+                EditorGUILayout.EndHorizontal();
+
                 // Clips list
                 EditorGUILayout.LabelField("Audio Clips", EditorStyles.boldLabel);
                 if (GUILayout.Button("Add Clip", GUILayout.Width(100)))
@@ -779,6 +912,14 @@ public class FootstepDesignerWindow : EditorWindow
             GUILayout.Space(5);
         }
 
+        GUILayout.Space(10);
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.BeginHorizontal();
+        effectsMasterGain = EditorGUILayout.Slider("Master Gain", effectsMasterGain, 0.1f, 3.0f);
+        DrawInfoIcon("Multiply the final processed amplitude before preview or baking. Use > 1.0 to boost quiet samples.");
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndVertical();
+
         GUILayout.Space(15);
 
         // Playback Controls
@@ -789,12 +930,22 @@ public class FootstepDesignerWindow : EditorWindow
         if (GUILayout.Button("Preview Effect Settings", GUILayout.Height(30)))
         {
             float[] sampleData = ApplyAudioEffects(effectSourceClip);
-            
-            // Create a preview clip
+
             previewProcessedClip = AudioClip.Create($"{effectSourceClip.name}_Preview", sampleData.Length / effectSourceClip.channels, effectSourceClip.channels, effectSourceClip.frequency, false);
             previewProcessedClip.SetData(sampleData, 0);
 
+            // Build amplitude envelope for waveform visualisation
+            effectsAmplitudeEnvelope = BuildAmplitudeEnvelope(sampleData, 200);
+
             PlayClip(previewProcessedClip);
+        }
+
+        if (previewProcessedClip != null)
+        {
+            if (GUILayout.Button("Play Sound", GUILayout.Height(30)))
+            {
+                PlayClip(previewProcessedClip);
+            }
         }
 
         if (GUILayout.Button("Bake and Save as Asset", GUILayout.Height(30)))
@@ -807,15 +958,38 @@ public class FootstepDesignerWindow : EditorWindow
             {
                 Directory.CreateDirectory(folderPath);
             }
-
             string absoluteFolderPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", folderPath));
-            string filePath = EditorUtility.SaveFilePanel("Save Processed Audio", absoluteFolderPath, defaultName, "wav");
+            string ext = "wav";
+            string assetPath = AssetDatabase.GetAssetPath(effectSourceClip);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                string srcExt = Path.GetExtension(assetPath).ToLower().TrimStart('.');
+                if (srcExt == "mp3" || srcExt == "ogg") ext = srcExt;
+            }
+
+            string filePath = EditorUtility.SaveFilePanel("Save Processed Audio", absoluteFolderPath, defaultName, ext);
 
             if (!string.IsNullOrEmpty(filePath))
             {
                 float[] sampleData = ApplyAudioEffects(effectSourceClip);
-                
-                WriteWavFile(filePath, sampleData, effectSourceClip.channels, effectSourceClip.frequency);
+                string chosenExt = Path.GetExtension(filePath).ToLower().TrimStart('.');
+
+                if (chosenExt == "wav")
+                {
+                    WriteWavFile(filePath, sampleData, effectSourceClip.channels, effectSourceClip.frequency);
+                }
+                else
+                {
+                    string tempWav = Path.Combine(Path.GetDirectoryName(filePath), Path.GetFileNameWithoutExtension(filePath) + "_temp.wav");
+                    WriteWavFile(tempWav, sampleData, effectSourceClip.channels, effectSourceClip.frequency);
+                    if (!ConvertFormat(tempWav, filePath))
+                    {
+                        string fallbackPath = Path.ChangeExtension(filePath, ".wav");
+                        File.Move(tempWav, fallbackPath);
+                        filePath = fallbackPath;
+                        Debug.LogWarning($"ffmpeg conversion to {chosenExt} failed or not installed. saved as wav.");
+                    }
+                }
                 
                 AssetDatabase.Refresh();
                 
@@ -831,10 +1005,49 @@ public class FootstepDesignerWindow : EditorWindow
         }
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.EndVertical();
+
+        // Waveform preview
+        GUILayout.Space(10);
+        DrawWaveformEnvelope(effectsAmplitudeEnvelope, "Processed Waveform");
+
         EditorGUILayout.EndScrollView();
     }
 
-    // --- Tab 3: Credits & License ---
+    // --- Tab 3: Settings ---
+    private void DrawSettingsTab()
+    {
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Footstep Designer Settings", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("configure global settings and log warning filters here. all settings default to off (unchecked).", MessageType.Info);
+        GUILayout.Space(10);
+
+        bool muteNoProfile = PlayerPrefs.GetInt("FootstepDesigner_MuteNoProfileMatch", 0) == 1;
+        bool muteNoClips = PlayerPrefs.GetInt("FootstepDesigner_MuteNoClips", 0) == 1;
+        bool muteRaycastMiss = PlayerPrefs.GetInt("FootstepDesigner_MuteRaycastMiss", 0) == 1;
+
+        EditorGUI.BeginChangeCheck();
+        
+        float oldWidth = EditorGUIUtility.labelWidth;
+        EditorGUIUtility.labelWidth = 260f;
+        
+        muteNoProfile = EditorGUILayout.Toggle("Mute Unmatched Surface Warnings", muteNoProfile);
+        muteNoClips = EditorGUILayout.Toggle("Mute Empty Audio Pool Warnings", muteNoClips);
+        muteRaycastMiss = EditorGUILayout.Toggle("Mute Raycast Miss Warnings", muteRaycastMiss);
+        
+        EditorGUIUtility.labelWidth = oldWidth;
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            PlayerPrefs.SetInt("FootstepDesigner_MuteNoProfileMatch", muteNoProfile ? 1 : 0);
+            PlayerPrefs.SetInt("FootstepDesigner_MuteNoClips", muteNoClips ? 1 : 0);
+            PlayerPrefs.SetInt("FootstepDesigner_MuteRaycastMiss", muteRaycastMiss ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+
+        EditorGUILayout.EndVertical();
+    }
+
+    // --- Tab 4: Credits & License ---
     private void DrawCreditsTab()
     {
         EditorGUILayout.BeginVertical("box");
@@ -879,6 +1092,15 @@ public class FootstepDesignerWindow : EditorWindow
             if (plugin.Enabled)
             {
                 samples = plugin.Apply(samples, channels, frequency);
+            }
+        }
+
+        // Apply master gain and clamp
+        if (Mathf.Abs(effectsMasterGain - 1.0f) > 0.001f)
+        {
+            for (int i = 0; i < samples.Length; i++)
+            {
+                samples[i] = Mathf.Clamp(samples[i] * effectsMasterGain, -1f, 1f);
             }
         }
 
@@ -1070,8 +1292,22 @@ public class FootstepDesignerWindow : EditorWindow
         foreach (var task in tasks)
         {
             string cleanSourceName = task.sourceClip.name.Replace(" ", "_");
-            string fileName = $"{cleanSourceName}_Baked_{task.suffix}_{task.index}.wav";
+            string ext = "wav";
+            string assetPath = AssetDatabase.GetAssetPath(task.sourceClip);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                string srcExt = Path.GetExtension(assetPath).ToLower().TrimStart('.');
+                if (srcExt == "mp3" || srcExt == "ogg") ext = srcExt;
+            }
+
+            string fileName = $"{cleanSourceName}_Baked_{task.suffix}_{task.index}.{ext}";
             string relativeAssetPath = Path.Combine(outputDir, fileName).Replace("\\", "/");
+
+            if (ext != "wav" && !File.Exists(Path.Combine(absoluteOutputDir, fileName)))
+            {
+                fileName = $"{cleanSourceName}_Baked_{task.suffix}_{task.index}.wav";
+                relativeAssetPath = Path.Combine(outputDir, fileName).Replace("\\", "/");
+            }
 
             AudioClip bakedClip = AssetDatabase.LoadAssetAtPath<AudioClip>(relativeAssetPath);
             if (bakedClip != null)
@@ -1140,11 +1376,43 @@ public class FootstepDesignerWindow : EditorWindow
             }
         }
 
+        // Apply master gain
+        if (Mathf.Abs(bakerMasterGain - 1.0f) > 0.001f)
+        {
+            for (int i = 0; i < outputData.Length; i++)
+            {
+                outputData[i] = Mathf.Clamp(outputData[i] * bakerMasterGain, -1f, 1f);
+            }
+        }
+
         string cleanSourceName = sourceClip.name.Replace(" ", "_");
-        string fileName = $"{cleanSourceName}_Baked_{suffix}_{index}.wav";
+        string assetPath = AssetDatabase.GetAssetPath(sourceClip);
+        string ext = "wav";
+        if (!string.IsNullOrEmpty(assetPath))
+        {
+            string srcExt = Path.GetExtension(assetPath).ToLower().TrimStart('.');
+            if (srcExt == "mp3" || srcExt == "ogg") ext = srcExt;
+        }
+
+        string fileName = $"{cleanSourceName}_Baked_{suffix}_{index}.{ext}";
         string absoluteFilePath = Path.Combine(absoluteOutputDir, fileName);
 
-        WriteWavFile(absoluteFilePath, outputData, channels, frequency);
+        if (ext == "wav")
+        {
+            WriteWavFile(absoluteFilePath, outputData, channels, frequency);
+        }
+        else
+        {
+            string tempWav = Path.Combine(absoluteOutputDir, $"{cleanSourceName}_Baked_{suffix}_{index}_temp.wav");
+            WriteWavFile(tempWav, outputData, channels, frequency);
+            if (!ConvertFormat(tempWav, absoluteFilePath))
+            {
+                fileName = $"{cleanSourceName}_Baked_{suffix}_{index}.wav";
+                absoluteFilePath = Path.Combine(absoluteOutputDir, fileName);
+                File.Move(tempWav, absoluteFilePath);
+                Debug.LogWarning($"ffmpeg conversion to {ext} failed or not installed. saved as wav.");
+            }
+        }
 
         string relativeAssetPath = Path.Combine(relativeOutputDir, fileName).Replace("\\", "/");
         return relativeAssetPath;
@@ -1252,24 +1520,103 @@ public class FootstepDesignerWindow : EditorWindow
         }
     }
 
-    private static void PlayClip(AudioClip clip)
+    private static bool ffmpegPromptedThisSession = false;
+
+    public static bool ConvertFormat(string wavPath, string targetPath)
     {
-        if (clip == null) return;
         try
         {
-            System.Reflection.Assembly assembly = typeof(AudioImporter).Assembly;
-            System.Type type = assembly.GetType("UnityEditor.AudioUtil");
-            System.Reflection.MethodInfo method = type.GetMethod("PlayPreviewClip", 
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (method != null)
+            var startInfo = new System.Diagnostics.ProcessStartInfo
             {
-                method.Invoke(null, new object[] { clip, 0, false });
+                FileName = "ffmpeg",
+                Arguments = $"-y -i \"{wavPath}\" \"{targetPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                process.WaitForExit();
+                if (process.ExitCode == 0 && File.Exists(targetPath))
+                {
+                    File.Delete(wavPath);
+                    return true;
+                }
             }
         }
-        catch (System.Exception e)
+        catch
         {
-            Debug.LogWarning("Failed to preview clip via reflection: " + e.Message);
         }
+
+        if (!ffmpegPromptedThisSession)
+        {
+            ffmpegPromptedThisSession = true;
+            EditorApplication.delayCall += () =>
+            {
+                if (EditorUtility.DisplayDialog("FFmpeg Missing",
+                    "FFmpeg is required to export MP3 or OGG files. Open download page to install it?",
+                    "Open Page", "Cancel"))
+                {
+                    Application.OpenURL("https://ffmpeg.org/download.html");
+                }
+            };
+        }
+
+        return false;
+    }
+
+    private static float[] BuildAmplitudeEnvelope(float[] samples, int width)
+    {
+        if (samples == null || samples.Length == 0) return null;
+        float[] envelope = new float[width];
+        int step = Mathf.Max(1, samples.Length / width);
+        for (int i = 0; i < width; i++)
+        {
+            float peak = 0f;
+            int start = i * step;
+            int end = Mathf.Min(start + step, samples.Length);
+            for (int j = start; j < end; j++)
+            {
+                float a = Mathf.Abs(samples[j]);
+                if (a > peak) peak = a;
+            }
+            envelope[i] = peak;
+        }
+        return envelope;
+    }
+
+    private static void DrawWaveformEnvelope(float[] envelope, string label = "Waveform Amplitude Envelope")
+    {
+        if (envelope == null || envelope.Length == 0) return;
+
+        EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
+        Rect rect = GUILayoutUtility.GetRect(100, 80, GUILayout.ExpandWidth(true));
+        GUI.Box(rect, "");
+
+        float halfH = rect.height / 2f;
+        float midY  = rect.y + halfH;
+        float stepX = rect.width / envelope.Length;
+
+        Color prev = GUI.color;
+        GUI.color = new Color(0.1f, 0.7f, 1f, 0.8f);
+
+        for (int i = 0; i < envelope.Length; i++)
+        {
+            float h = envelope[i] * halfH;
+            float x = rect.x + i * stepX;
+            GUI.DrawTexture(new Rect(x, midY - h, Mathf.Max(1f, stepX - 1f), h * 2f), EditorGUIUtility.whiteTexture);
+        }
+
+        GUI.color = prev;
+    }
+
+    private static void PlayClip(AudioClip clip)
+    {
+        if (clip == null)
+        {
+            Debug.LogWarning("[FootstepDesigner] PlayClip called with null clip.");
+            return;
+        }
+        EditorAudioPlayer.Play(clip);
     }
 
     private class BakeTask

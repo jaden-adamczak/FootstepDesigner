@@ -113,7 +113,7 @@ public class PerformanceTracker : MonoBehaviour
         // Count active voices playing currently
         int audioSourcesCount = 0;
         activeVoicesCount = 0;
-        AudioSource[] allSources = FindObjectsByType<AudioSource>(FindObjectsSortMode.None);
+        AudioSource[] allSources = FindObjectsByType<AudioSource>();
         audioSourcesCount = allSources.Length;
         for (int i = 0; i < allSources.Length; i++)
         {
@@ -221,7 +221,7 @@ public class PerformanceTracker : MonoBehaviour
                 }
             }
         }
-        catch (System.Exception e)
+        catch (System.Exception)
         {
             // Fail silently or to console if editor isn't in play mode
         }

@@ -9,6 +9,7 @@ public class PerformanceTracker : MonoBehaviour
 
     [SerializeField] private float logInterval = 1f;
     [SerializeField] private bool enableTracking = true;
+    [SerializeField] private string logLabel = "";
 
     private string logPath;
     private float timer;
@@ -61,7 +62,16 @@ public class PerformanceTracker : MonoBehaviour
             return;
         }
 
-        logPath = Path.Combine(Application.dataPath, "../footstep_performance.log");
+        string logsFolder = Path.Combine(Application.dataPath, "../Logs");
+        if (!Directory.Exists(logsFolder))
+        {
+            Directory.CreateDirectory(logsFolder);
+        }
+
+        string timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        string labelSuffix = string.IsNullOrEmpty(logLabel) ? "" : $"_{logLabel}";
+        string fileName = $"footstep_perf_{timestamp}{labelSuffix}.log";
+        logPath = Path.Combine(logsFolder, fileName);
         InitializeLogFile();
         maxRealVoices = AudioSettings.GetConfiguration().numRealVoices;
     }
@@ -241,6 +251,7 @@ public class PerformanceTracker : MonoBehaviour
     public int GetMaxRealVoices() => maxRealVoices;
     public int GetConsecutiveRepetitionsCount() => consecutiveRepetitionsCount;
     public List<StepRecord> GetStepHistory() => stepHistory;
+    public string GetLogPath() => logPath;
 
     public float GetVarietyIndex()
     {

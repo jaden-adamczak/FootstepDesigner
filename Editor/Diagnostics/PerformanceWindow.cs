@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 public class PerformanceWindow : EditorWindow
 {
-    private string logPath;
+    private string logsFolder;
 
     // Stress Test Settings
     private bool showStressTest = false;
@@ -30,7 +30,7 @@ public class PerformanceWindow : EditorWindow
 
     private void OnEnable()
     {
-        logPath = Path.Combine(Application.dataPath, "../footstep_performance.log");
+        logsFolder = Path.Combine(Application.dataPath, "../Logs");
     }
 
     private void OnDisable()
@@ -177,27 +177,37 @@ public class PerformanceWindow : EditorWindow
 
         GUILayout.Space(15);
         EditorGUILayout.LabelField("Log Management", EditorStyles.boldLabel);
+
+        // Show active log path if tracker is running
+        string activeLogPath = tracker != null ? tracker.GetLogPath() : null;
+        if (!string.IsNullOrEmpty(activeLogPath))
+        {
+            EditorGUILayout.LabelField("Active Log:", Path.GetFileName(activeLogPath), EditorStyles.miniLabel);
+        }
+
         EditorGUILayout.BeginHorizontal();
 
-        if (GUILayout.Button("Open Log File", GUILayout.Height(25)))
+        if (GUILayout.Button("Open Active Log", GUILayout.Height(25)))
         {
-            if (File.Exists(logPath))
+            if (!string.IsNullOrEmpty(activeLogPath) && File.Exists(activeLogPath))
             {
-                EditorUtility.OpenWithDefaultApp(logPath);
+                EditorUtility.OpenWithDefaultApp(activeLogPath);
             }
             else
             {
-                EditorUtility.DisplayDialog("Log Missing", "Log file does not exist yet. Run a scene to generate tracking data.", "OK");
+                EditorUtility.DisplayDialog("Log Missing", "No active log file. Enter Play Mode with a PerformanceTracker to start logging.", "OK");
             }
         }
 
-        if (GUILayout.Button("Clear Log File", GUILayout.Height(25)))
+        if (GUILayout.Button("Open Logs Folder", GUILayout.Height(25)))
         {
-            if (File.Exists(logPath))
+            if (Directory.Exists(logsFolder))
             {
-                File.Delete(logPath);
-                File.WriteAllText(logPath, "footstep performance log initialized\ntime,fps,frametime_ms,heap_mb,active_voices,max_voices,audio_sources,step_count,foley_count\n");
-                EditorUtility.DisplayDialog("Log Cleared", "Performance tracking log has been reset.", "OK");
+                EditorUtility.RevealInFinder(logsFolder);
+            }
+            else
+            {
+                EditorUtility.DisplayDialog("No Logs", "Logs folder does not exist yet. Run a scene to generate tracking data.", "OK");
             }
         }
 

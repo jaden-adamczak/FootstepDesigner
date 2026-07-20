@@ -1,5 +1,7 @@
 # FootstepDesigner
 
+![FDLogo](FDLogo.png)
+
 A modular footstep audio design tool for Unity. Intended (but not limited) for VR developers. Runs on low-spec hardware, making it compatible with all machines.
 
 Dissertation project by Jaden Adamczak, TCD PG AR/VR, 2026.

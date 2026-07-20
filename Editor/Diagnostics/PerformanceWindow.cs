@@ -13,14 +13,13 @@ public class PerformanceWindow : EditorWindow
     private int charactersToSpawn = 15;
     private int feetPerCharacter = 4; // e.g. Quadrupeds
     private int mockProfilesCount = 10;
-    private float stepTriggerRate = 20f; // Steps per second
 
     private GameObject stressRootGO;
     private List<GameObject> spawnedMockCharacters = new List<GameObject>();
     private List<string> createdProfilePaths = new List<string>();
 
     private bool isStressLoadTesting = false;
-    private double lastStepTime = 0f;
+    private Vector2 scrollPosition;
 
     [MenuItem("Tools/Footsteps/Performance Monitor")]
     public static void ShowWindow()
@@ -40,6 +39,7 @@ public class PerformanceWindow : EditorWindow
 
     private void OnGUI()
     {
+        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
         GUILayout.Space(10);
         EditorGUILayout.LabelField("Footstep Performance Diagnostics", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox("Monitor real-time sound system performance, variety statistics, and trigger automated load stress tests.", MessageType.Info);
@@ -52,12 +52,52 @@ public class PerformanceWindow : EditorWindow
             EditorGUILayout.HelpBox("Performance tracker not found in the active scene. Play a scene with a PerformanceTracker component.", MessageType.Warning);
             if (GUILayout.Button("Create Tracker GameObject in Scene"))
             {
-                GameObject go = new GameObject("PerformanceTracker");
-                go.AddComponent<PerformanceTracker>();
-                Selection.activeGameObject = go;
+                EditorApplication.delayCall += () =>
+                {
+                    GameObject go = new GameObject("PerformanceTracker");
+                    go.AddComponent<PerformanceTracker>();
+                    Selection.activeGameObject = go;
+                };
             }
             return;
         }
+
+        // Benchmark & Mode Configuration Section
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Benchmark & Mode Configuration", EditorStyles.boldLabel);
+        GUILayout.Space(5);
+
+        // 1. System Mode Dropdown
+        EditorGUI.BeginChangeCheck();
+        PerformanceTracker.TriggerMode newMode = (PerformanceTracker.TriggerMode)EditorGUILayout.EnumPopup("System Trigger Mode", tracker.ActiveTriggerMode);
+        if (EditorGUI.EndChangeCheck())
+        {
+            tracker.ActiveTriggerMode = newMode;
+            EditorUtility.SetDirty(tracker);
+            
+            // Sync all controllers in scene
+            DualFootstepController[] controllers = FindObjectsByType<DualFootstepController>();
+            foreach (var c in controllers)
+            {
+                c.triggerMode = (DualFootstepController.TriggerMode)newMode;
+                EditorUtility.SetDirty(c);
+            }
+        }
+
+        GUILayout.Space(5);
+
+        // 2. Timed benchmark configuration
+        SerializedObject trackerSO = new SerializedObject(tracker);
+        SerializedProperty durationProp = trackerSO.FindProperty("trackingDuration");
+        SerializedProperty autoQuitProp = trackerSO.FindProperty("autoQuitOnFinish");
+
+        trackerSO.Update();
+        EditorGUILayout.PropertyField(durationProp, new GUIContent("Benchmark Duration (s)", "Set to 0 for infinite/manual capture."));
+        EditorGUILayout.PropertyField(autoQuitProp, new GUIContent("Auto-Quit Play Mode"));
+        trackerSO.ApplyModifiedProperties();
+
+        EditorGUILayout.EndVertical();
+        GUILayout.Space(10);
 
         // Live Audio System Diagnostics
         EditorGUILayout.BeginVertical("box");
@@ -212,6 +252,7 @@ public class PerformanceWindow : EditorWindow
         }
 
         EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndScrollView();
     }
 
     private void DrawScatterPlot(List<PerformanceTracker.StepRecord> history)
@@ -360,6 +401,12 @@ public class PerformanceWindow : EditorWindow
             controller.autoDetectSteps = false; // Trigger manually to simulate load
             controller.fallbackToFirstProfile = true; // Avoid tag matching issues in empty scenes
             controller.surfaceProfiles = new List<SurfaceProfile>(mockProfiles);
+            
+            PerformanceTracker tracker = FindAnyObjectByType<PerformanceTracker>();
+            if (tracker != null)
+            {
+                controller.triggerMode = (DualFootstepController.TriggerMode)tracker.ActiveTriggerMode;
+            }
 
 
             // Add feet bones

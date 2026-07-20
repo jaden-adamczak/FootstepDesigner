@@ -7,12 +7,24 @@ public class PerformanceTracker : MonoBehaviour
 {
     public static PerformanceTracker Instance { get; private set; }
 
+    public enum TriggerMode
+    {
+        FootstepDesigner,
+        TraditionalSimulation
+    }
+
     [SerializeField] private float logInterval = 1f;
     [SerializeField] private bool enableTracking = true;
     [SerializeField] private string logLabel = "";
+    [SerializeField] private float trackingDuration = 0f; // 0 = infinite tracking
+    [SerializeField] private bool autoQuitOnFinish = false;
+    [SerializeField] private TriggerMode activeTriggerMode = TriggerMode.FootstepDesigner;
 
     private string logPath;
     private float timer;
+    private float trackingTimer;
+    private bool isTrackingFinished;
+    private string activeModeLabel = "Designer";
     private int totalSteps;
     private int totalFoleyEvents;
     private float fpsTimer;
@@ -55,6 +67,7 @@ public class PerformanceTracker : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            activeModeLabel = activeTriggerMode.ToString();
         }
         else
         {
@@ -84,8 +97,36 @@ public class PerformanceTracker : MonoBehaviour
             {
                 using (var writer = new StreamWriter(stream, Encoding.UTF8))
                 {
-                    writer.WriteLine("footstep performance log initialized");
-                    writer.WriteLine("time,fps,frametime_ms,heap_mb,active_voices,max_voices,audio_sources,step_count,foley_count");
+                    writer.WriteLine("# footstep performance log");
+                    writer.WriteLine($"# date={System.DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    writer.WriteLine($"# unity={Application.unityVersion}");
+                    writer.WriteLine($"# platform={Application.platform}");
+                    writer.WriteLine($"# mode={activeModeLabel}");
+                    writer.WriteLine($"# duration={trackingDuration.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}s");
+                    writer.WriteLine($"# log_interval={logInterval.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}s");
+                    writer.WriteLine($"# label={logLabel}");
+                    writer.WriteLine($"# max_real_voices={AudioSettings.GetConfiguration().numRealVoices}");
+                    writer.WriteLine($"# sample_rate={AudioSettings.outputSampleRate}");
+
+                    // Count scene characters and feet
+                    DualFootstepController[] controllers = FindObjectsByType<DualFootstepController>();
+                    int totalFeet = 0;
+                    int totalProfiles = 0;
+                    string triggerMode = "Unknown";
+                    foreach (var c in controllers)
+                    {
+                        if (c.feet != null) totalFeet += c.feet.Count;
+                        if (c.surfaceProfiles != null && c.surfaceProfiles.Count > totalProfiles)
+                            totalProfiles = c.surfaceProfiles.Count;
+                        triggerMode = c.triggerMode.ToString();
+                    }
+                    writer.WriteLine($"# characters={controllers.Length}");
+                    writer.WriteLine($"# total_feet={totalFeet}");
+                    writer.WriteLine($"# surface_profiles={totalProfiles}");
+                    writer.WriteLine($"# trigger_mode={triggerMode}");
+
+                    writer.WriteLine("#");
+                    writer.WriteLine("time,mode,fps,frametime_ms,heap_mb,active_voices,max_voices,audio_sources,step_count,foley_count");
                 }
             }
         }
@@ -95,9 +136,25 @@ public class PerformanceTracker : MonoBehaviour
         }
     }
 
+    public string ActiveModeLabel
+    {
+        get => activeModeLabel;
+        set => activeModeLabel = value;
+    }
+
+    public TriggerMode ActiveTriggerMode
+    {
+        get => activeTriggerMode;
+        set 
+        {
+            activeTriggerMode = value;
+            activeModeLabel = value.ToString();
+        }
+    }
+
     private void Update()
     {
-        if (!enableTracking) return;
+        if (!enableTracking || isTrackingFinished) return;
 
         fpsAccumulator++;
         fpsTimer += Time.unscaledDeltaTime;
@@ -106,6 +163,34 @@ public class PerformanceTracker : MonoBehaviour
             currentFps = fpsAccumulator / fpsTimer;
             fpsAccumulator = 0;
             fpsTimer = 0f;
+        }
+
+        if (trackingDuration > 0f)
+        {
+            trackingTimer += Time.deltaTime;
+            if (trackingTimer >= trackingDuration)
+            {
+                isTrackingFinished = true;
+                enableTracking = false;
+                
+                string summaryLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "[finish],duration={0:F1},mode={1},steps={2},foley={3},variety={4:F3},repetitions={5}",
+                    trackingDuration,
+                    activeModeLabel,
+                    totalSteps,
+                    totalFoleyEvents,
+                    GetVarietyIndex(),
+                    consecutiveRepetitionsCount
+                );
+                WriteLogLine(summaryLine);
+
+#if UNITY_EDITOR
+                if (autoQuitOnFinish)
+                {
+                    UnityEditor.EditorApplication.isPlaying = false;
+                }
+#endif
+                return;
+            }
         }
 
         timer += Time.deltaTime;
@@ -135,8 +220,9 @@ public class PerformanceTracker : MonoBehaviour
             }
         }
 
-        string logLine = string.Format("{0:F2},{1:F1},{2:F2},{3:F2},{4},{5},{6},{7},{8}",
+        string logLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F2},{1},{2:F1},{3:F2},{4:F2},{5},{6},{7},{8},{9}",
             Time.time,
+            activeModeLabel,
             currentFps,
             frameTime,
             heapMb,
@@ -209,7 +295,7 @@ public class PerformanceTracker : MonoBehaviour
         }
 
         string side = isFoley ? "foley" : (isLeft ? "left" : "right");
-        string logLine = string.Format("{0:F2},[step],char={1},foot={2},side={3},speed={4:F2},surface={5},clip={6},volume={7:F3},pitch={8:F3},rep={9}",
+        string logLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F2},[step],char={1},foot={2},side={3},speed={4:F2},surface={5},clip={6},volume={7:F3},pitch={8:F3},rep={9}",
             Time.time,
             characterName,
             footName,

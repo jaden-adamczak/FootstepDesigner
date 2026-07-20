@@ -10,7 +10,14 @@ public class DualFootstepController : MonoBehaviour
         SymmetricLeftOnly    // All feet use the first sound pack (Left foot)
     }
 
+    public enum TriggerMode
+    {
+        FootstepDesigner,
+        TraditionalSimulation
+    }
+
     [Header("Configuration Mode")]
+    public TriggerMode triggerMode = TriggerMode.FootstepDesigner;
     public FootstepMode footstepMode = FootstepMode.SymmetricLeftOnly;
 
     [System.Serializable]
@@ -56,6 +63,10 @@ public class DualFootstepController : MonoBehaviour
 
     private Vector3 lastPosition;
     private float currentSpeed;
+    private float simulatedStepTimer;
+    private bool simulatedStepFootAlternate;
+    private SurfaceProfile cachedTraditionalProfile;
+    private float lastTraditionalRaycastTime = -1f;
     
     [Header("Debug Settings")]
     [Tooltip("Show the detection raycast in the Scene view (Green = Hit, Red = Miss).")]
@@ -188,6 +199,104 @@ public class DualFootstepController : MonoBehaviour
         }
     }
 
+    private SurfaceProfile GetTraditionalSurfaceProfile()
+    {
+        if (Time.time == lastTraditionalRaycastTime)
+        {
+            return cachedTraditionalProfile;
+        }
+
+        lastTraditionalRaycastTime = Time.time;
+        cachedTraditionalProfile = null;
+
+        // Perform a single root raycast from character transform center downward
+        Vector3 start = transform.position + Vector3.up * 0.2f;
+        Vector3 dir = Vector3.down;
+        
+        if (Physics.Raycast(start, dir, out RaycastHit hit, raycastDistance + 0.2f, groundLayer))
+        {
+            string groundTag = hit.collider.tag;
+            PhysicsMaterial hitPhysicMaterial = hit.collider.sharedMaterial;
+
+            List<Material> hitRenderMaterials = new List<Material>();
+            Renderer renderer = hit.collider.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                if (renderer.sharedMaterials != null)
+                {
+                    hitRenderMaterials.AddRange(renderer.sharedMaterials);
+                }
+                else if (renderer.sharedMaterial != null)
+                {
+                    hitRenderMaterials.Add(renderer.sharedMaterial);
+                }
+            }
+
+            foreach (SurfaceProfile profile in surfaceProfiles)
+            {
+                if (profile == null) continue;
+
+                bool matchesPhysicMaterial = hitPhysicMaterial != null && profile.physicMaterials != null && profile.physicMaterials.Contains(hitPhysicMaterial);
+                bool matchesRenderMaterial = false;
+                if (profile.renderMaterials != null && hitRenderMaterials.Count > 0)
+                {
+                    foreach (var mat in hitRenderMaterials)
+                    {
+                        if (mat != null && profile.renderMaterials.Contains(mat))
+                        {
+                            matchesRenderMaterial = true;
+                            break;
+                        }
+                    }
+                }
+                bool matchesTag = !string.IsNullOrEmpty(profile.surfaceTag) && profile.surfaceTag != "Untagged" && profile.surfaceTag == groundTag;
+
+                if (matchesPhysicMaterial || matchesRenderMaterial || matchesTag)
+                {
+                    cachedTraditionalProfile = profile;
+                    break;
+                }
+            }
+        }
+
+        if (cachedTraditionalProfile == null && fallbackToFirstProfile && surfaceProfiles != null && surfaceProfiles.Count > 0)
+        {
+            cachedTraditionalProfile = surfaceProfiles.Find(p => p != null);
+        }
+
+        return cachedTraditionalProfile;
+    }
+
+    private void PlayTraditionalStep(SurfaceProfile profile, bool isLeft, AudioSource source, float speed, string characterName, string footName)
+    {
+        if (profile == null) return;
+        
+        // Simulates playing a random clip from the base sample pool of size n
+        bool forceLeft = (footstepMode == FootstepMode.SymmetricLeftOnly) ? true : isLeft;
+        AudioClip clipToPlay = profile.GetRandomBaseSample(forceLeft);
+        if (clipToPlay == null)
+        {
+            clipToPlay = profile.GetRandomBake(forceLeft);
+        }
+        
+        if (clipToPlay != null)
+        {
+            source.spatialBlend = spatialBlend;
+            source.outputAudioMixerGroup = profile.customMixerGroup != null ? profile.customMixerGroup : defaultMixerGroup;
+            
+            // Traditional simple on-the-fly random pitch shift (+/- 5%) and static volume
+            source.pitch = 1f + Random.Range(-0.05f, 0.05f);
+            source.volume = 0.8f - Random.Range(0f, 0.1f);
+            
+            source.PlayOneShot(clipToPlay);
+            
+            if (PerformanceTracker.Instance != null)
+            {
+                PerformanceTracker.Instance.LogStepEvent(characterName, footName, isLeft, speed, profile.surfaceTag, clipToPlay.name, source.volume, source.pitch, isFoley: false);
+            }
+        }
+    }
+
     private void DetectAndPlay(FootSetup foot, float customSpeed = -1f)
     {
         if (foot == null) return;
@@ -203,6 +312,24 @@ public class DualFootstepController : MonoBehaviour
         if (source == null)
         {
             Debug.LogWarning($"[FootstepController] Audio Source reference is missing on the controller!");
+            return;
+        }
+
+        float speedToUse = (customSpeed >= 0f) ? customSpeed : currentSpeed;
+
+        bool isTraditional = (triggerMode == TriggerMode.TraditionalSimulation);
+        if (PerformanceTracker.Instance != null)
+        {
+            isTraditional = (PerformanceTracker.Instance.ActiveTriggerMode == PerformanceTracker.TriggerMode.TraditionalSimulation);
+        }
+
+        if (isTraditional)
+        {
+            SurfaceProfile profile = GetTraditionalSurfaceProfile();
+            if (profile != null)
+            {
+                PlayTraditionalStep(profile, isLeft, source, speedToUse, gameObject.name, foot.name);
+            }
             return;
         }
 
@@ -223,7 +350,6 @@ public class DualFootstepController : MonoBehaviour
             }
         }
 
-        float speedToUse = (customSpeed >= 0f) ? customSpeed : currentSpeed;
         float normSpeed = Mathf.Clamp01(speedToUse / maxSpeed);
 
         if (hasHit)
@@ -270,7 +396,14 @@ public class DualFootstepController : MonoBehaviour
                 if (matchesPhysicMaterial || matchesRenderMaterial || matchesTag)
                 {
                     matchedAnyProfile = true;
-                    PlayFootstepFromProfile(profile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                    if (isTraditional)
+                    {
+                        PlayTraditionalStep(profile, isLeft, source, speedToUse, gameObject.name, foot.name);
+                    }
+                    else
+                    {
+                        PlayFootstepFromProfile(profile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                    }
                     break;
                 }
             }
@@ -282,7 +415,14 @@ public class DualFootstepController : MonoBehaviour
                     SurfaceProfile fallbackProfile = surfaceProfiles.Find(p => p != null);
                     if (fallbackProfile != null)
                     {
-                        PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                        if (isTraditional)
+                        {
+                            PlayTraditionalStep(fallbackProfile, isLeft, source, speedToUse, gameObject.name, foot.name);
+                        }
+                        else
+                        {
+                            PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                        }
                         return;
                     }
                 }
@@ -310,7 +450,14 @@ public class DualFootstepController : MonoBehaviour
                 SurfaceProfile fallbackProfile = surfaceProfiles.Find(p => p != null);
                 if (fallbackProfile != null)
                 {
-                    PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                    if (isTraditional)
+                    {
+                        PlayTraditionalStep(fallbackProfile, isLeft, source, speedToUse, gameObject.name, foot.name);
+                    }
+                    else
+                    {
+                        PlayFootstepFromProfile(fallbackProfile, isLeft, source, normSpeed, gameObject.name, foot.name);
+                    }
                     return;
                 }
             }
@@ -376,6 +523,10 @@ public class DualFootstepController : MonoBehaviour
     private void Start()
     {
         lastPosition = transform.position;
+        if (PerformanceTracker.Instance != null && triggerMode == TriggerMode.TraditionalSimulation)
+        {
+            PerformanceTracker.Instance.ActiveTriggerMode = PerformanceTracker.TriggerMode.TraditionalSimulation;
+        }
     }
 
     private void Update()
@@ -387,16 +538,52 @@ public class DualFootstepController : MonoBehaviour
         }
         lastPosition = currPos;
 
-        if (autoDetectSteps)
+        bool isTraditional = (triggerMode == TriggerMode.TraditionalSimulation);
+        if (PerformanceTracker.Instance != null)
         {
-            for (int i = 0; i < feet.Count; i++)
+            isTraditional = (PerformanceTracker.Instance.ActiveTriggerMode == PerformanceTracker.TriggerMode.TraditionalSimulation);
+        }
+
+        if (isTraditional)
+        {
+            if (autoDetectSteps)
             {
-                var foot = feet[i];
-                if (foot == null) continue;
+                // Bypasses raycasting completely and triggers steps on speed-based intervals
+                if (currentSpeed > 0.1f)
+                {
+                    simulatedStepTimer += Time.deltaTime;
+                    float speedFactor = Mathf.Clamp01(currentSpeed / maxSpeed);
+                    float currentStepInterval = Mathf.Lerp(0.45f, 0.25f, speedFactor);
+                    if (simulatedStepTimer >= currentStepInterval)
+                    {
+                        simulatedStepTimer = 0f;
+                        simulatedStepFootAlternate = !simulatedStepFootAlternate;
+                        
+                        // Select one of the available feet
+                        int footIdx = simulatedStepFootAlternate ? feet.FindIndex(f => f.isLeft) : feet.FindIndex(f => !f.isLeft);
+                        if (footIdx < 0) footIdx = 0;
+                        StepFoot(footIdx);
+                    }
+                }
+                else
+                {
+                    simulatedStepTimer = 0f;
+                }
+            }
+        }
+        else
+        {
+            if (autoDetectSteps)
+            {
+                for (int i = 0; i < feet.Count; i++)
+                {
+                    var foot = feet[i];
+                    if (foot == null) continue;
 
-                if (foot.cooldownTimer > 0f) foot.cooldownTimer -= Time.deltaTime;
+                    if (foot.cooldownTimer > 0f) foot.cooldownTimer -= Time.deltaTime;
 
-                CheckAutoStep(foot);
+                    CheckAutoStep(foot);
+                }
             }
         }
     }

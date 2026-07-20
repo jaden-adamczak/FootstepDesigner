@@ -5,6 +5,7 @@ using System.Collections.Generic;
 [CustomEditor(typeof(DualFootstepController))]
 public class FootstepControllerEditor : Editor
 {
+    private SerializedProperty triggerMode;
     private SerializedProperty footstepMode;
     private SerializedProperty feet;
     private SerializedProperty surfaceProfiles;
@@ -38,6 +39,7 @@ public class FootstepControllerEditor : Editor
 
     private void OnEnable()
     {
+        triggerMode = serializedObject.FindProperty("triggerMode");
         footstepMode = serializedObject.FindProperty("footstepMode");
         feet = serializedObject.FindProperty("feet");
         surfaceProfiles = serializedObject.FindProperty("surfaceProfiles");
@@ -72,6 +74,7 @@ public class FootstepControllerEditor : Editor
         // Core Setup
         EditorGUILayout.LabelField("Footstep Controller Setup", sectionHeaderStyle);
         EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.PropertyField(triggerMode);
         EditorGUILayout.PropertyField(footstepMode);
         EditorGUILayout.PropertyField(feet, new GUIContent("Feet Setup List"), true);
         EditorGUILayout.EndVertical();

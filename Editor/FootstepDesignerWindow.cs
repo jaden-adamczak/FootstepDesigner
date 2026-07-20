@@ -547,8 +547,8 @@ public class FootstepDesignerWindow : EditorWindow
             targetFoot = (TargetFoot)EditorGUILayout.EnumPopup("Target Foot", targetFoot);
             
             EditorGUILayout.BeginHorizontal();
-            variationCount = EditorGUILayout.IntSlider("Variations Count", variationCount, 1, 20);
-            DrawInfoIcon("Number of unique WAV variations to generate based on the first Base AudioClip in your pool.");
+            variationCount = EditorGUILayout.IntSlider("Variations Per Clip", variationCount, 1, 20);
+            DrawInfoIcon("Number of unique WAV variations to generate per base clip. All base clips in the pool are baked.");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -1199,20 +1199,20 @@ public class FootstepDesignerWindow : EditorWindow
     {
         if (selectedProfile == null) return;
 
-        AudioClip leftBase = selectedProfile.leftFootBaseSamples.Count > 0 ? selectedProfile.leftFootBaseSamples[0] : null;
-        AudioClip rightBase = selectedProfile.rightFootBaseSamples.Count > 0 ? selectedProfile.rightFootBaseSamples[0] : null;
+        List<AudioClip> leftBaseClips = selectedProfile.leftFootBaseSamples;
+        List<AudioClip> rightBaseClips = selectedProfile.rightFootBaseSamples;
 
-        if (targetFoot == TargetFoot.Left && leftBase == null)
+        if (targetFoot == TargetFoot.Left && (leftBaseClips == null || leftBaseClips.Count == 0))
         {
-            EditorUtility.DisplayDialog("Error", "No Left Foot base sample found.", "OK");
+            EditorUtility.DisplayDialog("Error", "No Left Foot base samples found.", "OK");
             return;
         }
-        if (targetFoot == TargetFoot.Right && rightBase == null)
+        if (targetFoot == TargetFoot.Right && (rightBaseClips == null || rightBaseClips.Count == 0))
         {
-            EditorUtility.DisplayDialog("Error", "No Right Foot base sample found.", "OK");
+            EditorUtility.DisplayDialog("Error", "No Right Foot base samples found.", "OK");
             return;
         }
-        if (targetFoot == TargetFoot.Both && leftBase == null && rightBase == null)
+        if (targetFoot == TargetFoot.Both && (leftBaseClips == null || leftBaseClips.Count == 0) && (rightBaseClips == null || rightBaseClips.Count == 0))
         {
             EditorUtility.DisplayDialog("Error", "No base samples assigned to the selected profile.", "OK");
             return;
@@ -1232,21 +1232,33 @@ public class FootstepDesignerWindow : EditorWindow
         List<BakeTask> tasks = new List<BakeTask>();
         if (targetFoot == TargetFoot.Left || targetFoot == TargetFoot.Both)
         {
-            if (leftBase != null)
+            if (leftBaseClips != null)
             {
-                for (int i = 1; i <= variationCount; i++)
+                for (int clipIdx = 0; clipIdx < leftBaseClips.Count; clipIdx++)
                 {
-                    tasks.Add(new BakeTask { sourceClip = leftBase, suffix = "Left", index = i, isLeft = true });
+                    AudioClip baseClip = leftBaseClips[clipIdx];
+                    if (baseClip == null) continue;
+                    for (int i = 1; i <= variationCount; i++)
+                    {
+                        int globalIndex = clipIdx * variationCount + i;
+                        tasks.Add(new BakeTask { sourceClip = baseClip, suffix = "Left", index = globalIndex, isLeft = true });
+                    }
                 }
             }
         }
         if (targetFoot == TargetFoot.Right || targetFoot == TargetFoot.Both)
         {
-            if (rightBase != null)
+            if (rightBaseClips != null)
             {
-                for (int i = 1; i <= variationCount; i++)
+                for (int clipIdx = 0; clipIdx < rightBaseClips.Count; clipIdx++)
                 {
-                    tasks.Add(new BakeTask { sourceClip = rightBase, suffix = "Right", index = i, isLeft = false });
+                    AudioClip baseClip = rightBaseClips[clipIdx];
+                    if (baseClip == null) continue;
+                    for (int i = 1; i <= variationCount; i++)
+                    {
+                        int globalIndex = clipIdx * variationCount + i;
+                        tasks.Add(new BakeTask { sourceClip = baseClip, suffix = "Right", index = globalIndex, isLeft = false });
+                    }
                 }
             }
         }
